@@ -1,0 +1,10 @@
+* blinken wenn sms versendet
+
+software serial
+[ok] daten über usb gerät 1
+[] beide gleichzeitig resetten, danach gerät 2 reseten damit gsm
+[] daten kommen beim empfänger an
+[ok] daten in der sms
+[] usb debugging gerät 2
+
+[ok] software neu raufspielen gerät 2

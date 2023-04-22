@@ -1,0 +1,58 @@
+Checklist
+
+Installation
+
+   [ok] Code-Abschnitte einbauen
+      [ok] RTC
+      [ok] storePressure()
+      [ok] printPressures()
+      [ok] timeReader
+      [ok] computeTendency()
+      [ok] resetBMP()
+   [] Verkabelung
+   [ok] ist timer aktiviert?
+   [ok] initialisiert
+   [ok] interrupt attached
+   [ok] event(s) scheduled
+   [] Array ist nach einem Tag mit gültigen Werten befüllt
+
+   [] tendency value is correct
+   [] tendency string is correct
+
+
+
+Kompilieren
+USB-Kabel anstecken
+Gerät und Upload Port auswählen
+Upload
+Serial Monitor aktivieren
+
+[] ausprobieren
+[] nicht mehr wissen was man getan hat
+
+  [] wiring
+[ok] Neustart aller Geräte
+[] ARduino Sketches neu installiert
+
+SoftwareSerial
+   [ok] wiring 10,11
+        Ard I --> TX[fail] RX[ok]  RX[fail] TX[ok] --> Ard I
+
+   data gesendet? 
+   data angekommen?
+   über softSerial beim andern Arduino prüfen
+   [ok] softSerail Ports geändert
+   [ok] Pins geändert
+   1020 Bytes für lokale Variablen verbleibend
+[] SoftSerial entfernen
+Baud-Rate erhöhen
+anderes kabel verwenden
+einen string bauen für Serial und softSerial 
+
+[ok] 2 Patschen 
+    [] Erlebnis
+[ok] mit der Katze spielen, damit sie müde wird und nicht stört
+[ok] strom: alles abstecken
+
+für die Zukunft
+[] GPRS
