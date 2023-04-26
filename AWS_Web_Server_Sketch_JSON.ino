@@ -1,4 +1,3 @@
-#include <SPI.h>           // used to communicated via the spi bus
 #include <SoftwareSerial.h>
 SoftwareSerial softSerial(10, 11);
 
@@ -319,7 +318,7 @@ void isr_timer() {
   if(timerCount % 5 == 0)
   //if(timerCount == 5)
   {
-    windSpeed = rotations * 0.9 * 1.609 * 0.18;
+    windSpeed = rotations * 0.9 * 1.609 * 0.09;
     wspeeds[isp] = windSpeed;
     rotations = 0;
     //timerCount = 0;
@@ -335,13 +334,13 @@ void isr_timer() {
       Serial.println("RTC lost confidence in the DateTime!");
   
     // every hour
-    if((now.Minute() == 0) && (now.Second() == 0) && !fired_hourly) { 
+    if((now.Minute() == 0) && !fired_hourly) { 
       storePressure(pressure);
       printPressures();
       computeTendency();
       fired_hourly = true;
     }
-    if((now.Minute() == 0)  && (now.Second() == 1) && fired_hourly) { 
+    if((now.Minute() == 1)  && fired_hourly) { 
       fired_hourly = false;
     }
     timerCount = 0;
