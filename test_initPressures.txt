@@ -1,0 +1,29 @@
+to test
+
+initPressuresBetterWithFormular sollte ungefähr dem array entsprechen
+sinewave
+Testergebnis:
+   initPressuresBetter war falsch, weil linear
+       [passt] Wertebereich 1010.0 und 1030.0 (20)
+       [fail] Verlauf entspricht dem Tagesverlauf einer standardisierten Luftdruckkurve
+   initPressuresBetterWithFormular liefert eine optisch ansprechende Kurve
+       [passt] Wertebereich 1010.0 und 1030.0 (20)
+       [passt] Verlauf entspricht dem Tagesverlauf einer standardisierten Luftdruckkurve
+
+Testergebnis nach Verbesserung:
+   initPressuresBetter
+       [passt] Wertebereich 1018.0 und 1022.0 (4)
+       [passt] Verlauf entspricht dem Tagesverlauf einer standardisierten Luftdruckkurve
+   initPressuresBetterWithFormular liefert eine optisch ansprechende Kurve
+       [passt] Wertebereich 1018.0 und 1022.0 (4)
+       [passt] Verlauf entspricht dem Tagesverlauf einer standardisierten Luftdruckkurve
+
+
+storePressure
+p
+
+[ok] initPressuresBetterWithFormular
+[ok] computeTendency in setup
+[ok] computeTendency in isr_timer hourly
+
+commit nicht vergessen! ;-)

@@ -90,7 +90,7 @@ const int numValues = 4;
    float humidity;
    float temperature;
    float pressure;
-   String tendency;
+   String tendency_str;
    //boolean p_fired = false;
    //boolean bmp_reset_fired = false;
 
@@ -103,7 +103,9 @@ boolean fired_hourly = false;
 boolean fired_daily = false;
 int s = 0;
 
-void setup() { 
+void setup() {
+  pinMode(LED_BUILTIN, OUTPUT); 
+  digitalWrite(LED_BUILTIN, HIGH);
   Rtc.Begin();
   // setup anemometer values
   lastDirValue = 0;
@@ -125,7 +127,6 @@ void setup() {
   // Setup the timer intterupt for 0.5 second
   Timer1.initialize(500000);
   Timer1.attachInterrupt(isr_timer);
-  Timer1.attachInterrupt(timeReader);
   
   sei();// Enable Interrupts   
 
@@ -160,14 +161,15 @@ void setup() {
   sensors_event_t pressure_event;
   bmp_pressure->getEvent(&pressure_event);
   pressure = pressure_event.pressure + 49;
-  initPressures(pressure);
+  initPressuresWithArrayData(pressure);
+  computeTendency();
+  digitalWrite(LED_BUILTIN, LOW);
 }
   
 void loop() { 
    // read sensors
-  windSpeed = getWindSpeed();
-  windSpeedMin = getWindSpeedMin();
-  windSpeedMax = getWindSpeedMax();
+  //windSpeedMin = getWindSpeedMin();
+  //windSpeedMax = getWindSpeedMax();
   windDirection = getWindDirection();
   humidity = dht.readHumidity();
   temperature = dht.readTemperature();
@@ -176,8 +178,6 @@ void loop() {
   bmp_temp->getEvent(&temp_event);
   bmp_pressure->getEvent(&pressure_event);
   pressure = pressure_event.pressure + 49;
-
-  tendency = computeTendency();
 
   //Serial.print(temp_event.temperature);
   //Serial.println(" *C");
@@ -225,35 +225,31 @@ Serial.println(softSerial.readString());*/
 
 //Serial.print(temperature);
 //Serial.print(round(temperature, 1));
-Serial.print(printZehntel(temperature * 10.0));
+Serial.print(temperature,1);
 Serial.print("o");
 Serial.print("C ");
-Serial.print(pressure);
+Serial.print(pressure,1);
 Serial.print("hPa ");
-for(int i = 0; i < 24; i++) {
-  Serial.print(pressures[i]);
-  Serial.print(" ");
-}
-Serial.print(tendency);
-Serial.print(" ");
+//printPressures();
+if(tendency_str.length() > 0) { Serial.print(tendency_str); Serial.print(" "); }
 //Serial.print(windSpeed);
 //Serial.print(round(windSpeed*10.0)/10.0);
-Serial.print(printZehntel(windSpeed*10.0));
+Serial.print(windSpeed,1);
 Serial.print("km/h ");
 Serial.println(convertWind(windDirection+180));
 
-softSerial.print(printZehntel(temperature * 10.0));
+digitalWrite(LED_BUILTIN, HIGH);
+softSerial.print(temperature,1);
 softSerial.print("o");
 softSerial.print("C ");
-softSerial.print(pressure);
+softSerial.print(pressure,1);
 softSerial.print("hPa ");
-softSerial.print(tendency);
-softSerial.print(" ");
-softSerial.print(printZehntel(windSpeed*10.0));
+if(tendency_str.length() > 0) { softSerial.print(tendency_str); softSerial.print(" "); }
+softSerial.print(windSpeed,1);
 softSerial.print("km/h ");
 softSerial.println(convertWind(windDirection+180));
-
-delay(1000);
+digitalWrite(LED_BUILTIN, LOW);
+delay(2000);
 }
 
 void resetBMP() {
@@ -320,18 +316,35 @@ void isr_timer() {
   
   timerCount++;
   
-  if(timerCount == 5)
+  if(timerCount % 5 == 0)
+  //if(timerCount == 5)
   {
-    // convert to mp/h using the formula V=P(2.25/T)
-    // V = P(2.25/2.5) = P * 0.9
-    // convert to km/h (1 mph = 1.609 km/h) 
-    windSpeed = rotations * 0.9 * 1.609;
+    windSpeed = rotations * 0.9 * 1.609 * 0.18;
     wspeeds[isp] = windSpeed;
-    //if(windSpeed > windSpeedMax) windSpeedMax = windSpeed; // total max
-    //Serial.println(rotations);
     rotations = 0;
-    timerCount = 0;
+    //timerCount = 0;
     if(isp >= 23) isp = 0; else isp++;
+  }
+  if(timerCount == 60) {  
+    RtcDateTime now = Rtc.GetDateTime();
+
+    printDateTime(now);
+    Serial.println();
+
+    if (!now.IsValid())
+      Serial.println("RTC lost confidence in the DateTime!");
+  
+    // every hour
+    if((now.Minute() == 0) && (now.Second() == 0) && !fired_hourly) { 
+      storePressure(pressure);
+      printPressures();
+      computeTendency();
+      fired_hourly = true;
+    }
+    if((now.Minute() == 0)  && (now.Second() == 1) && fired_hourly) { 
+      fired_hourly = false;
+    }
+    timerCount = 0;
   }
 }
 
@@ -394,61 +407,6 @@ float getWindSpeedMin() {
   windSpeedMax = 0.0f;  
 }*/
 
-void timeReader() {
-  timerCount2++;
-  if(timerCount2 = 60) {  
-    //Serial.println("timereader interrupt");
-    RtcDateTime now = Rtc.GetDateTime();
-
-    //printDateTime(now);
-    //Serial.println();
-
-    if (!now.IsValid())
-    {
-        // Common Causes:
-        //    1) the battery on the device is low or even missing and the power line was disconnected
-        Serial.println("RTC lost confidence in the DateTime!");
-    }
-
-    if((now.Second() > s)) {
-      s = now.Second(); if(s==59) s = -1;
-    }
-
-    // every minute
-    if((now.Second() == 0) && !fired) { 
-      //storePressure(now);
-      //printPressures();
-      fired = true;
-    }
-    if((now.Second() == 1) && fired) { 
-      //Serial.println("every minute reset");
-      fired = false;
-    }    
-    // every hour
-    if((now.Minute() == 0) && (now.Second() == 0) && !fired_hourly) { 
-      //Serial.println("every hour");
-      storePressure(pressure);
-      printPressures();
-      fired_hourly = true;
-    }
-    if((now.Minute() == 0)  && (now.Second() == 1) && fired_hourly) { 
-      //Serial.println("every hour reset");
-      fired_hourly = false;
-    }
-
-    if((now.Hour() == 0) && (now.Second() == 0) && !fired_daily) { 
-      //Serial.println("every day");
-      resetBMP();
-      fired_daily = true;
-    }
-    if((now.Hour() == 0) && (now.Second() == 1) && fired_daily) { 
-      //Serial.println("every day reset");
-      fired_daily = false;
-    }
-    timerCount2 = 0;
-  } // timerCount2
-}
-
 // init pressure array with current pressure
 void initPressures(float pressure) {
   for(int p = 0; p < PRESSURES_SIZE; p++) {
@@ -456,12 +414,23 @@ void initPressures(float pressure) {
   }
 }
 
-float korrektur[] = { 10.0, 8.33, 6.67, 5.0, 3.34, 1.67, 0.0, -1.67, -3.34, -5.0, -6.67, -8.33, -10.0, -8.33, -6.67, -5.0, -3.34, -1.67, 0.0, +1.67, +3.34, +5.0, +6.67, +8.33, +10.0 };
+float korrektur[] = { 0, 0.518, 1.0, 1.414, 1.732, 1.932, 2.0, 1.932, 1.732, 1.414, 1.0, 0.518, 0, -0.518, -1.0, -1.414, -1.732, -1.932, -2.0, -1.932, -1.732, -1.414, -1, -0.518, 0 };
+
 // init pressure array with estimated pressures based on current pressure
-void initPressuresBetter(float pressure) {
+void initPressuresWithArrayData(float pressure) {
   RtcDateTime now = Rtc.GetDateTime();
   for(int p = 0; p < PRESSURES_SIZE; p++) {
-    pressures[p] = pressure + korrektur[now.Hour()];
+    pressures[p] = pressure + korrektur[(now.Hour()+p) % 24];
+  }
+}
+
+float sinewave(int x) {
+  return sin(0.2618*x)*(4/2);
+}
+void initPressuresWithFormular(float pressure) {
+  RtcDateTime now = Rtc.GetDateTime();
+  for(int p = 0; p < PRESSURES_SIZE; p++) {
+    pressures[p] = pressure + sinewave((now.Hour()+p) % 24);
   }
 }
 
@@ -489,28 +458,27 @@ String computeTendency() {
   Serial.print(", p1: ");
   Serial.print(p1);*/
   //Serial.print(", pressures[p0]: ");
-  Serial.print(pressures[p0]);
-  Serial.print(" ");
+  //Serial.print(pressures[p0]);
+  //Serial.print(" ");
   //Serial.print(", pressures[p1]: ");
-  Serial.print(pressures[p1]);
-  Serial.print(" ");
+  //Serial.print(pressures[p1]);
+  //Serial.print(" ");
   float tendency;
   float pressure0 = round(pressures[p0]*10.0)/10.0;
   float pressure1 = round(pressures[p1]*10.0)/10.0;
-  Serial.print(pressure0);
-  Serial.print(" ");
-  Serial.print(pressure1);
+  //Serial.print(pressure0);
+  //Serial.print(" ");
+  //Serial.print(pressure1);
   if(pressure0 >= pressure1)
     tendency = pressure0 - pressure1; // steigend
   else
     tendency = -1 * (pressure1 - pressure0); // fallend
-  Serial.print(", tendency: ");
-  Serial.println(tendency);
-  String tendency_str;
+  //Serial.print(", tendency: ");
+  //Serial.println(tendency);
   if(tendency > 0) tendency_str = "rising";
   else if(tendency == 0) tendency_str = "steady";
   else tendency_str = "falling";
-  Serial.println(tendency_str);
+  //Serial.println(tendency_str);
   return tendency_str;
 }
 
