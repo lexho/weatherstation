@@ -1,0 +1,5 @@
+unnötiger treiber entdeckt
+maus fängt an zu spinnen
+ünnötiger treiber gelöscht
+Timer1 geht auch nicht auf nano Architektur
+12:50 falschen sketch erwischt, neuer versuch
