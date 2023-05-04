@@ -23,3 +23,6 @@
    * DAT --> 7
    * CLK --> 6
    * RST --> 8
+
+## Sample Output
+```20.0 oC 1018.1hPa rising 16.0km/h W```
