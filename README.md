@@ -8,18 +8,18 @@
 
 ## Wiring
 * DHT 
- out --> D5
-   + --> 5V
-   - --> GND
+ * out --> D5
+ * '+' --> 5V
+ * '-' --> GND
 * BMP280
-    VCC --> 5V
-    GND --> GND
-    SCL --> A4
-    SDA --> A5
+ * VCC --> 5V
+ * GND --> GND
+ * SCL --> A4
+ * SDA --> A5
 * TM1637 
-    CLK --> 12
-    DIO --> 13
+ * CLK --> 12
+ * DIO --> 13
 * RtcDS1302
-    DAT --> 7
-    CLK --> 6
-    RST --> 8
+ * DAT --> 7
+ * CLK --> 6
+ * RST --> 8
