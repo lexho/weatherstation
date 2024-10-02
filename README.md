@@ -1,4 +1,6 @@
 # Weather7573
+This weatherstation measures the following values: temperature, pressure, windspeed, wind direction. Every second it prints one line with current data on the console.
+
 ## Requirements
 * [TimerOne](https://github.com/PaulStoffregen/TimerOne)
 * [DHT](https://github.com/adafruit/DHT-sensor-library)
