@@ -1,5 +1,5 @@
 # Weather7573
-This weatherstation measures the following values: temperature, pressure, wind speed, wind direction. Every second it prints one line with current data on the console.
+This weather station measures the following values: temperature, pressure, wind speed, wind direction. Every second it prints one line with current data on the console.
 
 ## Requirements
 * [TimerOne](https://github.com/PaulStoffregen/TimerOne)
