@@ -1,163 +1,65 @@
-#include <SoftwareSerial.h>
-SoftwareSerial softSerial(10, 11);
-
-#include "TimerOne.h"          // Timer Interrupt set to 2 second for read sensors
-#include <math.h>
+#include "TimerOne.h"  // Timer Interrupt set to 2 second for read sensors
 
 #include "DHT.h"
-
-#include <Wire.h>
-#include <SPI.h>
 #include <Adafruit_BMP280.h>
-#include <TM1637Display.h>
 
-// Module connection pins (Digital Pins)
-#define CLK 12
-#define DIO 13
-TM1637Display display(CLK, DIO);
-
-  uint8_t data[] = { 0xff, 0xff, 0xff, 0xff };
-  uint8_t blank[] = { 0x00, 0x00, 0x00, 0x00 };
-
-uint8_t c = SEG_A | SEG_F | SEG_E | SEG_D;
-    uint8_t f = SEG_A | SEG_F | SEG_E | SEG_G;
-    uint8_t a = SEG_A | SEG_F | SEG_E | SEG_B | SEG_C | SEG_G; //display.encodeDigit(8);
-    uint8_t l = SEG_F | SEG_E | SEG_D;
-    uint8_t r = SEG_E | SEG_G;
-    uint8_t i = SEG_F | SEG_E;
-    uint8_t digit_s = display.encodeDigit(5);
-    uint8_t e = SEG_A | SEG_F | SEG_E | SEG_D | SEG_G;
-    uint8_t n = SEG_E | SEG_F | SEG_A | SEG_B | SEG_C; // N
-    uint8_t o = display.encodeDigit(0); // O
-    uint8_t w = SEG_F | SEG_E | SEG_D | SEG_C | SEG_B; // W
-    uint8_t rise[] = { r, i, digit_s, e };
-    uint8_t fall[] = { f, a, l, l };
-    uint8_t himmelsrichtungen[] = {n, o, digit_s, w};
-  int displayCounter = 0;
-// CONNECTIONS:
-// DS1302 CLK/SCLK --> 5 6
-// DS1302 DAT/IO --> 4 7
-// DS1302 RST/CE --> 2 8
-// DS1302 VCC --> 3.3v - 5v
-// DS1302 GND --> GND
-
-#include <ThreeWire.h>  
-#include <RtcDS1302.h>
-ThreeWire myWire(7,6,8); // IO, SCLK, CE
-RtcDS1302<ThreeWire> Rtc(myWire);
-
-Adafruit_BMP280 bmp; // use I2C interface
+Adafruit_BMP280 bmp;  // use I2C interface
 Adafruit_Sensor *bmp_temp = bmp.getTemperatureSensor();
 Adafruit_Sensor *bmp_pressure = bmp.getPressureSensor();
 
 #define DHTPIN 5  // Digital pin connected to the DHT sensor
-// Feather HUZZAH ESP8266 note: use pins 3, 4, 5, 12, 13 or 14 --
-// Pin 15 can work but DHT must be disconnected during program upload.
-
-// Uncomment whatever type you're using!
-//#define DHTTYPE DHT11   // DHT 11
-#define DHTTYPE DHT22  // DHT 22  (AM2302), AM2321
-//#define DHTTYPE DHT21   // DHT 21 (AM2301)
-
-// Connect pin 1 (on the left) of the sensor to +5V
-// NOTE: If using a board with 3.3V logic like an Arduino Due connect pin 1
-// to 3.3V instead of 5V!
-// Connect pin 2 of the sensor to whatever your DHTPIN is
-// Connect pin 3 (on the right) of the sensor to GROUND (if your sensor has 3 pins)
-// Connect pin 4 (on the right) of the sensor to GROUND and leave the pin 3 EMPTY (if your sensor has 4 pins)
-// Connect a 10K resistor from pin 2 (data) to pin 1 (power) of the sensor
-
-// Initialize DHT sensor.
-// Note that older versions of this library took an optional third parameter to
-// tweak the timings for faster processors.  This parameter is no longer needed
-// as the current DHT reading algorithm adjusts itself to work on faster procs.
+#define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
 
-#define Bucket_Size 0.01   // bucket size to trigger tip count
-#define TX_Pin 8           // used to indicate web data tx
-
-#define WindSensor_Pin (2)      // The pin location of the anemometer sensor
-#define WindVane_Pin (A2)       // The pin the wind vane sensor is connected to
+#define WindSensor_Pin (2)  // The pin location of the anemometer sensor
+#define WindVane_Pin (A2)   // The pin the wind vane sensor is connected to
 #define VaneOffset 0        // define the anemometer offset from magnetic north
 
-//volatile unsigned long tipCount;    // bucket tip counter used in interrupt routine 
-//volatile unsigned long contactTime; // Timer to manage any contact bounce in interrupt routine 
-
-volatile unsigned int  timerCount;    // used to determine 2.5sec timer count
-volatile unsigned long rotations;     // cup rotation counter used in interrupt routine
+volatile unsigned int timerCount;          // used to determine 2.5sec timer count
+volatile unsigned long rotations;          // cup rotation counter used in interrupt routine
 volatile unsigned long contactBounceTime;  // Timer to avoid contact bounce in interrupt routine
 
-//long lastTipcount;            // keeps track of bucket tips 
+volatile int minute = 0;
+volatile int hour = 0;
+int minute_offset = 0;
+int hour_offset = 0;
 
-volatile float windSpeed;
-//float windSpeedMax; // replaced by function getWindSpeedMax()
-int vaneValue;       // raw analog value from wind vane
-int vaneDirection;   // translated 0 - 360 direction
-int calDirection;    // converted value with offset applied
-int lastDirValue;    // last recorded direction value 
+volatile float windspeed;
+int vaneValue;      // raw analog value from wind vane
+int vaneDirection;  // translated 0 - 360 direction
+int calDirection;   // converted value with offset applied
 
-float minTemp;   // keeps track of the minimum recorded temp value
-float maxTemp;   // keeps track of the maximum recorded temp value  
+int winddir;
+float temperature;
+float pressure;
+String tendency_str;
 
-// arayas we use for averaging sensor data
-float temps[12];    // array of 12 temps to create a 2 minute average temp
-float wspeeds[24];  // array of 24 wind speeds for 2 minute average wind speed
-float wdirect[24];  // array of 24 wind directions for 2 minute average
-int isp = 0; // Iterator for wspeeds-Array
-int idr = 0; // Iterator for wdirect-Array
-
-const int numValues = 4;
-   float windSpeedMin;
-   float windSpeedMax;
-   int windDirection;
-   float humidity;
-   float temperature;
-   float pressure;
-   String tendency_str;
-   //boolean p_fired = false;
-   //boolean bmp_reset_fired = false;
-
-volatile unsigned int  timerCount2; 
 const int PRESSURES_SIZE = 25;
 float pressures[PRESSURES_SIZE];
 int p = 0;
 boolean fired = false;
 boolean fired_hourly = false;
-boolean fired_daily = false;
-int s = 0;
+//int c = 0; // count time units for printPressure()
 
 void setup() {
-  pinMode(LED_BUILTIN, OUTPUT); 
+  pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH);
-      display.setBrightness(0x0f);
-    display.setSegments(data);
-  Rtc.Begin();
-  // setup anemometer values
-  lastDirValue = 0;
-  rotations = 0;
-  //windSpeedMax = 0.0f; // replaced by function getWindSpeedMax()
 
+  // setup anemometer values
+  rotations = 0;
   // setup timer values
   timerCount = 0;
 
-  // disable the SD card by switching pin 4 high
-  pinMode(4, OUTPUT);
-  digitalWrite(4, HIGH);
-
-  //pinMode(RG11_Pin, INPUT); 
   pinMode(WindSensor_Pin, INPUT);
-  
   attachInterrupt(digitalPinToInterrupt(WindSensor_Pin), isr_rotation, FALLING);
 
   // Setup the timer intterupt for 0.5 second
   Timer1.initialize(500000);
   Timer1.attachInterrupt(isr_timer);
-  
-  sei();// Enable Interrupts   
+  sei();  // Enable Interrupts
 
   dht.begin();
   Serial.begin(9600);
-  softSerial.begin(9600); //115299
 
   unsigned status;
   //status = bmp.begin(BMP280_ADDRESS_ALT, BMP280_CHIPID);
@@ -170,15 +72,15 @@ void setup() {
       //Serial.println(addr, HEX);
     } else {
       Serial.println(addr, HEX);
-      if(bmp.sensorID() > 0) break;
+      if (bmp.sensorID() > 0) break;
     }
   }
-  Serial.print("bmp.sensorID()");
+  Serial.print("bmp sensorID: ");
   Serial.println(bmp.sensorID());
 
   bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
                   Adafruit_BMP280::SAMPLING_X1,     /* Temp. oversampling */
-                  Adafruit_BMP280::SAMPLING_X8,    /* Pressure oversampling */
+                  Adafruit_BMP280::SAMPLING_X8,     /* Pressure oversampling */
                   Adafruit_BMP280::FILTER_OFF,      /* Filtering. */
                   Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
   //bmp_temp->printSensorDetails();
@@ -186,95 +88,75 @@ void setup() {
   sensors_event_t pressure_event;
   bmp_pressure->getEvent(&pressure_event);
   pressure = pressure_event.pressure + 49;
+  if(isnan(pressure) || pressure < 955 || pressure > 1075) pressure = 1000.0;
   initPressuresWithArrayData(pressure);
   computeTendency();
   digitalWrite(LED_BUILTIN, LOW);
 }
-  
-void loop() { 
-   // read sensors
-  //windSpeedMin = getWindSpeedMin();
-  //windSpeedMax = getWindSpeedMax();
-  windDirection = getWindDirection();
-  humidity = dht.readHumidity();
-  temperature = dht.readTemperature();
-  sensors_event_t temp_event, pressure_event;
 
+void loop() {
+  // read sensors
+  sensors_event_t temp_event, pressure_event;
   bmp_temp->getEvent(&temp_event);
   bmp_pressure->getEvent(&pressure_event);
+
+  temperature = dht.readTemperature();
   pressure = pressure_event.pressure + 49;
+  //windspeed
+  winddir = getwinddir();
+  
+  // fake values
+  /*temperature = random(-10,50);
+  pressure = random(960, 1070);
+  windspeed = random(0, 180);
+  winddir = random(0, 360);*/
 
-  //Serial.print(temp_event.temperature);
-  //Serial.println(" *C");
-  //Serial.print(",");
-  //Serial.print("Pressure:");
-  //Serial.print(pressure_event.pressure);
-
-    // Check if any reads failed and exit early (to try again).
-  if (isnan(temperature)) {
-    Serial.println(F("Failed to read from DHT sensor!"));
-    return;
+  // write validated sensor data to serial
+  digitalWrite(LED_BUILTIN, HIGH);
+  computeMinute();
+  /*Serial.print(hour);
+  Serial.print(":");
+  Serial.print(minute);
+  Serial.print(":");
+  Serial.print(millis());
+  Serial.print(" ");*/
+  if (isnan(temperature) || temperature < -30 || temperature > 100) {
+    Serial.print("X");
+  } else {
+    Serial.print(temperature, 1);
+    Serial.print("o");
+    Serial.print("C");
   }
+  Serial.print(" ");
+  if (isnan(pressure) || pressure < 955 || pressure > 1075) {
+    bmp.reset();
+    Serial.print("X");
+  } else {
+    Serial.print(pressure, 1);
+    Serial.print("hPa");
+  }
+  Serial.print(" ");
+  Serial.print(tendency_str);
+  Serial.print(" ");
+  if (isnan(windspeed) || windspeed < 0 || windspeed > 200) {
+    Serial.print("X");
+  } else {
+    Serial.print(windspeed, 1);
+    Serial.print("km/h");
+  }
+  Serial.print(" ");
+  if (isnan(winddir) || winddir < 0) {
+    Serial.print("X");
+  } else {
+    Serial.print(convertWind(winddir + 180));
+  }
+  Serial.println();
 
-  /*Serial.print(F("Humidity: "));
-  Serial.print(humidity);
-  Serial.print(F("% Temperature: "));
-  Serial.print(temperature);
-  Serial.println(F("°C "));
-  Serial.print(" windSpeed: ");
-  Serial.print(windSpeed);
-  Serial.print(" windSpeedMin: ");
-  Serial.print(windSpeedMin);
-  Serial.print(" windSpeedMax: ");
-  Serial.print(windSpeedMax);
-  Serial.print(" windDirection: ");
-  Serial.println(windDirection);*/
+  //if(c == 10) { printPressures(); c = 0; }
+  //c++;
+  digitalWrite(LED_BUILTIN, LOW);
 
-/*//Serial.println((millis() / 1000) % 5);
-  if((millis() / 1000) % 5 == 1) fired = false;
- if(!fired && (millis() / 1000) % 5 == 0){
-    fired = true;
-printJSON();
-}*/
-
-/*Serial.print(temperature);
-Serial.print(" ");
-Serial.print(-1);
-Serial.print(" ");
-Serial.print(windSpeed);
-Serial.print(" ");
-Serial.println(windDirection);
-
-Serial.println(softSerial.readString());*/
-
-
-//Serial.print(temperature);
-//Serial.print(round(temperature, 1));
-Serial.print(temperature,1);
-Serial.print("o");
-Serial.print("C ");
-Serial.print(pressure,1);
-Serial.print("hPa ");
-//printPressures();
-if(tendency_str.length() > 0) { Serial.print(tendency_str); Serial.print(" "); }
-//Serial.print(windSpeed);
-//Serial.print(round(windSpeed*10.0)/10.0);
-Serial.print(windSpeed,1);
-Serial.print("km/h ");
-Serial.println(convertWind(windDirection+180));
-
-digitalWrite(LED_BUILTIN, HIGH);
-softSerial.print(temperature,1);
-softSerial.print("o");
-softSerial.print("C ");
-softSerial.print(pressure,1);
-softSerial.print("hPa ");
-if(tendency_str.length() > 0) { softSerial.print(tendency_str); softSerial.print(" "); }
-softSerial.print(windSpeed,1);
-softSerial.print("km/h ");
-softSerial.println(convertWind(windDirection+180));
-digitalWrite(LED_BUILTIN, LOW);
-delay(2000);
+  delay(200);
 }
 
 void resetBMP() {
@@ -286,24 +168,24 @@ void resetBMP() {
       //Serial.println(addr, HEX);
     } else {
       Serial.println(addr, HEX);
-      if(bmp.sensorID() > 0) break;
+      if (bmp.sensorID() > 0) break;
     }
   }
-  Serial.print("bmp.sensorID()");
+  Serial.print("bmp sensorID: ");
   Serial.println(bmp.sensorID());
 
   bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
                   Adafruit_BMP280::SAMPLING_X1,     /* Temp. oversampling */
-                  Adafruit_BMP280::SAMPLING_X8,    /* Pressure oversampling */
+                  Adafruit_BMP280::SAMPLING_X8,     /* Pressure oversampling */
                   Adafruit_BMP280::FILTER_OFF,      /* Filtering. */
                   Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
-  //bmp_temp->printSensorDetails();  
+  //bmp_temp->printSensorDetails();
 }
 
 String convertWind(int degree) {
-degree = degree + 22;
+  degree = degree + 22;
   degree = degree % 360;
-//Serial.println(degree);
+  //Serial.println(degree);
   if (degree < 45) {
     return "N";
   } else if (degree < 90) {
@@ -325,51 +207,22 @@ degree = degree + 22;
   }
 }
 
-String printZehntel(int zehntel) {
-  String output = "";
-  if (zehntel < 0) {
-    output.concat('-');
-    zehntel = -zehntel;
-  }
-  output.concat(zehntel / 10);
-  output.concat('.');
-  output.concat(zehntel % 10);
-  return output;
-}
 // isr routine for timer interrupt
 void isr_timer() {
-  
   timerCount++;
-  
-  if(timerCount % 4 == 0) {
-    printDisplay();
-  }
-  if(timerCount % 5 == 0)
-  //if(timerCount == 5)
-  {
-    windSpeed = rotations * 0.9 * 1.609 * 0.09;
-    wspeeds[isp] = windSpeed;
+  if (timerCount % 5 == 0) {
+    windspeed = rotations * 0.9 * 1.609 * 0.09;
     rotations = 0;
-    //timerCount = 0;
-    if(isp >= 23) isp = 0; else isp++;
   }
-  if(timerCount == 60) {  
-    RtcDateTime now = Rtc.GetDateTime();
-
-    printDateTime(now);
-    Serial.println();
-
-    if (!now.IsValid())
-      Serial.println("RTC lost confidence in the DateTime!");
-  
-    // every hour
-    if((now.Minute() == 0) && !fired_hourly) { 
-      storePressure(pressure);
-      printPressures();
+  if (timerCount == 60) {
+    if ((minute == 0) && !fired_hourly) {
+      if(isnan(pressure)) storePressure(1100.0);
+      else storePressure(pressure);
+      //printPressures();
       computeTendency();
       fired_hourly = true;
     }
-    if((now.Minute() == 1)  && fired_hourly) { 
+    if ((minute == 1) && fired_hourly) {
       fired_hourly = false;
     }
     timerCount = 0;
@@ -377,100 +230,47 @@ void isr_timer() {
 }
 
 // interrupt handler to increment the rotation count for wind speed
-void isr_rotation ()   {
-
-  if ((millis() - contactBounceTime) > 15 ) {  // debounce the switch contact.
+void isr_rotation() {
+  if ((millis() - contactBounceTime) > 15) {  // debounce the switch contact.
     rotations++;
     contactBounceTime = millis();
   }
 }
 
 // Get Wind Direction
-int getWindDirection() {
- 
-  //vaneValue = analogRead(WindVane_Pin);
-  wdirect[idr] = analogRead(WindVane_Pin);
-  if(idr >= 23) idr = 0; else idr++;
+int getwinddir() {
+  vaneValue = analogRead(WindVane_Pin);
+  vaneDirection = map(vaneValue, 0, 1023, 0, 360);
+  calDirection = vaneDirection + VaneOffset;
 
-  // compute average vaneValue
-  int sum = 0;
-  for(int i = 0; i < 24; i++) {
-    sum += wdirect[i];
-  }
-  vaneValue = sum / 24;
-   
-   //calDirection = vaneValue;
-   vaneDirection = map(vaneValue, 0, 1023, 0, 360);
-   //vaneDirection = map(vaneValue, 0, 422, 0, 360);
-   calDirection = vaneDirection + VaneOffset;
-   
-   if(calDirection > 360)
-     calDirection = calDirection - 360;
-     
-   if(calDirection < 0)
-     calDirection = calDirection + 360;
+  if (calDirection > 360)
+    calDirection = calDirection - 360;
+  if (calDirection < 0)
+    calDirection = calDirection + 360;
   return calDirection;
 }
 
-float getWindSpeed() {
-return windSpeed;  
-}
-
-float getWindSpeedMax() {
-    float speed_max = 0.0;
-    for(int i = 0; i < 24; i++) {
-      if(wspeeds[i] > speed_max) speed_max = wspeeds[i];
-    }
-    return speed_max;
-}
-
-float getWindSpeedMin() {
-    float speed_min = wspeeds[0];
-    for(int i = 0; i < 24; i++) {
-      if(wspeeds[i] < speed_min) speed_min = wspeeds[i];
-    }
-    return speed_min;
-}
-/*void resetWindSpeedMax() {
-  windSpeedMax = 0.0f;  
-}*/
-
-// init pressure array with current pressure
-void initPressures(float pressure) {
-  for(int p = 0; p < PRESSURES_SIZE; p++) {
-    pressures[p] = pressure;
-  }
-}
-
-float korrektur[] = { 0, 0.518, 1.0, 1.414, 1.732, 1.932, 2.0, 1.932, 1.732, 1.414, 1.0, 0.518, 0, -0.518, -1.0, -1.414, -1.732, -1.932, -2.0, -1.932, -1.732, -1.414, -1, -0.518, 0 };
+float correction[] = { 0, 0.518, 1.0, 1.414, 1.732, 1.932, 2.0, 1.932, 1.732, 1.414, 1.0, 0.518, 0, -0.518, -1.0, -1.414, -1.732, -1.932, -2.0, -1.932, -1.732, -1.414, -1, -0.518, 0 };
 
 // init pressure array with estimated pressures based on current pressure
 void initPressuresWithArrayData(float pressure) {
-  RtcDateTime now = Rtc.GetDateTime();
-  for(int p = 0; p < PRESSURES_SIZE; p++) {
-    pressures[p] = pressure + korrektur[(now.Hour()+p) % 24];
-  }
-}
-
-float sinewave(int x) {
-  return sin(0.2618*x)*(4/2);
-}
-void initPressuresWithFormular(float pressure) {
-  RtcDateTime now = Rtc.GetDateTime();
-  for(int p = 0; p < PRESSURES_SIZE; p++) {
-    pressures[p] = pressure + sinewave((now.Hour()+p) % 24);
+  for (int p = 0; p < PRESSURES_SIZE; p++) {
+    float value = pressure + correction[(getHour() + p) % 24];
+    //Serial.println(value);
+    pressures[p] = value;
   }
 }
 
 void storePressure(float pressure) {
-  //pressures[p] = ((float) random()) / 100.0;
+Serial.print("store pressure ");
+  Serial.println(pressure);
   pressures[p] = pressure;
   p++;
   if (p >= PRESSURES_SIZE) p = 0;
 }
 
 void printPressures() {
-    for (int i = 0; i < PRESSURES_SIZE; i++) {
+  for (int i = 0; i < PRESSURES_SIZE; i++) {
     Serial.print(pressures[i]);
     Serial.print(" ");
   }
@@ -480,150 +280,35 @@ void printPressures() {
 String computeTendency() {
   int p0 = p - 1;
   int p1 = p;
-  if(p0 < 0) p0 = PRESSURES_SIZE-1;
-  /*Serial.print("p0: ");
-  Serial.print(p0);
-  Serial.print(", p1: ");
-  Serial.print(p1);*/
-  //Serial.print(", pressures[p0]: ");
-  //Serial.print(pressures[p0]);
-  //Serial.print(" ");
-  //Serial.print(", pressures[p1]: ");
-  //Serial.print(pressures[p1]);
-  //Serial.print(" ");
+  if (p0 < 0) p0 = PRESSURES_SIZE - 1;
+
   float tendency;
-  float pressure0 = round(pressures[p0]*10.0)/10.0;
-  float pressure1 = round(pressures[p1]*10.0)/10.0;
-  //Serial.print(pressure0);
-  //Serial.print(" ");
-  //Serial.print(pressure1);
-  if(pressure0 >= pressure1)
-    tendency = pressure0 - pressure1; // steigend
+  float pressure0 = round(pressures[p0] * 10.0) / 10.0;
+  float pressure1 = round(pressures[p1] * 10.0) / 10.0;
+  if(isnan(pressure0) || pressure0 < 955 || pressure0 > 1075 || 
+     isnan(pressure1) || pressure1 < 955 || pressure1 > 1075) {
+    tendency_str = "invalid";
+    return;
+  }
+
+
+  if (pressure0 >= pressure1)
+    tendency = pressure0 - pressure1;  // rising
   else
-    tendency = -1 * (pressure1 - pressure0); // fallend
-  //Serial.print(", tendency: ");
-  //Serial.println(tendency);
-  if(tendency > 0) tendency_str = "rising";
-  else if(tendency == 0) tendency_str = "steady";
+    tendency = -1 * (pressure1 - pressure0);  // falling
+
+  if (tendency > 0) tendency_str = "rising";
+  else if (tendency == 0) tendency_str = "steady";  // steady
   else tendency_str = "falling";
-  //Serial.println(tendency_str);
   return tendency_str;
 }
 
-void printJSON() { 
-               Serial.println("{");
-             Serial.print("\t\"wind\": {"); Serial.println();    
-                Serial.print("\t\t\"speed\": {"); Serial.println();    
-                    Serial.print("\t\t\t\"value\": "); Serial.print(windSpeed); Serial.print(","); Serial.println(); 
-                    Serial.print("\t\t\t\"min\": "); Serial.print(windSpeedMin); Serial.print(","); Serial.println();
-                    Serial.print("\t\t\t\"max\": "); Serial.print(windSpeedMax); Serial.print(","); Serial.println();  
-                    Serial.print("\t\t\t\"unit\": "); Serial.print("\"km/h\""); Serial.println(); 
-                Serial.print("\t\t},"); Serial.println();
-                Serial.print("\t\t\"direction\": {"); Serial.println();
-                    Serial.print("\t\t\t\"value\": "); Serial.print(windDirection); Serial.print(","); Serial.println();
-                    Serial.print("\t\t\t\"unit\": "); Serial.print("\"degree\""); Serial.println(); 
-                Serial.print("\t\t}"); Serial.println();
-             Serial.print("\t},"); Serial.println();
-            Serial.println("\t\"temperature\": {");
-                Serial.print("\t\t\"value\": "); Serial.print(temperature); Serial.println(","); 
-                Serial.print("\t\t\"unit\": "); Serial.println("\"°C\"");
-             Serial.println("\t}");
-             Serial.println("}");
+int computeMinute() {
+  minute = (millis() / 1000 / 60) % 60;
 }
 
-#define countof(a) (sizeof(a) / sizeof(a[0]))
-
-void printDateTime(const RtcDateTime& dt)
-{
-    char datestring[20];
-
-    snprintf_P(datestring, 
-            countof(datestring),
-            PSTR("%02u/%02u/%04u %02u:%02u:%02u"),
-            dt.Month(),
-            dt.Day(),
-            dt.Year(),
-            dt.Hour(),
-            dt.Minute(),
-            dt.Second() );
-    Serial.print(datestring);
-}
-
-void printNumberOnDisplay(int number) {
-  int n1 = number % 10; // 102
-  number /= 10;
-  int n2 = number % 10;
-  number /= 10;
-  int n3 = number % 10;
-  number /= 10;
-  int n4 = number % 10;
-
-  uint8_t data[] = { 0x00, 0x00, 0x00, 0x00 };
-  data[0] = display.encodeDigit(n4);  // R
-  data[1] = display.encodeDigit(n3);
-  data[2] = display.encodeDigit(n2);
-  data[3] = display.encodeDigit(n1); // L
-  if(n4 == 0) data[0] = 0x0;
-  if(n4 == 0 && n3 == 0) data[1] = 0x0;
-  if(n4 == 0 && n3 == 0 && n2 == 0) data[2] = 0x0;
-  display.setSegments(data);
-}
-
-void printNumberWithDegreeOnDisplay(int number) {
-  int n1 = number % 10; // 102
-  number /= 10;
-  int n2 = number % 10;
-  number /= 10;
-  int n3 = number % 10;
-  number /= 10;
-  int n4 = number % 10;
-
-  // 0b01011100
-  uint8_t data[] = { 0x0, 0x0, SEG_A | SEG_B | SEG_F | SEG_G, c };
-
-  data[0] = display.encodeDigit(n2);  // R
-  data[1] = display.encodeDigit(n1);
-  //data[2] = display.encodeDigit(n1);
-  //data[3] = display.encodeDigit(n2); // L
-  display.setSegments(data);
-}
-
-void printDisplay() {
-  switch(displayCounter) {
-  case 0:
-    printNumberWithDegreeOnDisplay(temperature);
-  break;
-  case 1:
-    printNumberOnDisplay(pressure);
-  break;
-  case 2:
-    if(tendency_str == "rising")
-      display.setSegments(rise);
-    else
-      display.setSegments(fall);
-  break;
-  case 3:
-    printNumberOnDisplay(windSpeed); // km/h
-  break;
-  case 4:
-    uint8_t himmelsrichtungenN[] = {n, 0x0, 0x0, 0x0};
-    uint8_t himmelsrichtungenO[] = {o, 0x0, 0x0, 0x0};
-    uint8_t himmelsrichtungenS[] = {digit_s, 0x0, 0x0, 0x0};
-    uint8_t himmelsrichtungenW[] = {w, w, 0x0, 0x0};
-
-    uint8_t himmelsrichtungenNW[] = {n, w, w, 0x0};
-    uint8_t himmelsrichtungenNO[] = {n, o, 0x0, 0x0};
-    uint8_t himmelsrichtungenSW[] = {digit_s, w, w, 0x0};
-    uint8_t himmelsrichtungenSO[] = {digit_s, o, 0x0, 0x0};
-
-    //display.setSegments(himmelsrichtungenSO);
-    display.setSegments(himmelsrichtungenSW);
-    //display.setSegments(himmelsrichtungenO);
-    //display.setSegments(himmelsrichtungenS);
-    //display.setSegments(himmelsrichtungenW);
-  break;
-  }
-  displayCounter++;
-  if(displayCounter > 4) displayCounter = 0;
-  //timet = millis();
+int getHour() {
+  computeMinute();
+  hour = (minute / 60) % 24;
+  return hour;
 }
