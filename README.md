@@ -1,4 +1,4 @@
-# Weather7573
+# Weatherstation
 This weather station measures the following values: temperature, pressure, wind speed, wind direction. Every second it prints one line with current data on the console.
 
 ## Requirements
