@@ -16,6 +16,9 @@ This weather station measures the following values: temperature, pressure, wind 
    * GND --> GND
    * SCL --> A4
    * SDA --> A5
+* Windsensor
+    * Anemometer --> 2
+    * Wind Vane --> A2
 
 ## Sample Output
 ```20.0 oC 1018.1hPa rising 16.0km/h W```
