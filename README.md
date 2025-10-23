@@ -17,7 +17,7 @@ This weather station measures the following values: temperature, pressure, wind 
    * SCL --> A4
    * SDA --> A5
 * Windsensor
-    * Anemometer --> 2
+    * Anemometer --> D2
     * Wind Vane --> A2
 
 ## Sample Output
