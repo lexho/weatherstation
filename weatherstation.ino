@@ -59,7 +59,7 @@ void setup() {
   sei();  // Enable Interrupts
 
   dht.begin();
-  Serial.begin(9600);
+  Serial.begin(2000000);
 
   unsigned status;
   //status = bmp.begin(BMP280_ADDRESS_ALT, BMP280_CHIPID);
@@ -211,7 +211,7 @@ String convertWind(int degree) {
 void isr_timer() {
   timerCount++;
   if (timerCount % 5 == 0) {
-    windspeed = rotations * 0.9 * 1.609 * 0.09;
+    windspeed = rotations * 1.7;
     rotations = 0;
   }
   if (timerCount == 60) {
