@@ -59,7 +59,7 @@ void setup() {
   sei();  // Enable Interrupts
 
   dht.begin();
-  Serial.begin(2000000);
+  Serial.begin(115200);
 
   unsigned status;
   //status = bmp.begin(BMP280_ADDRESS_ALT, BMP280_CHIPID);
