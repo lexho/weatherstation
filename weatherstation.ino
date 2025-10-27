@@ -87,7 +87,7 @@ void setup() {
 
   sensors_event_t pressure_event;
   bmp_pressure->getEvent(&pressure_event);
-  pressure = pressure_event.pressure + 49;
+  pressure = pressure_event.pressure;
   if(isnan(pressure) || pressure < 955 || pressure > 1075) pressure = 1000.0;
   initPressuresWithArrayData(pressure);
   computeTendency();
@@ -101,7 +101,7 @@ void loop() {
   bmp_pressure->getEvent(&pressure_event);
 
   temperature = dht.readTemperature();
-  pressure = pressure_event.pressure + 49;
+  pressure = pressure_event.pressure;
   //windspeed
   winddir = getwinddir();
   
