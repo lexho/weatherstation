@@ -1,71 +1,70 @@
-#include "TimerOne.h"  // Timer Interrupt set to 2 second for read sensors
+/*
+  Wetterstation - Arduino Uno
+  Sensoren: Davis Windmesser + Davis Windfahne, DHT22, BMP280
 
-#include "DHT.h"
+  Bibliotheken (Bibliotheksverwalter):
+    - "DHT sensor library" (Adafruit)
+    - "Adafruit BMP280 Library" (zieht Unified Sensor + BusIO nach)
+
+  Verdrahtung (übliche Davis-RJ11-Belegung, bitte mit eurem Kabel prüfen):
+    Windmesser-Kontakt (schwarz) -> D2   (interner Pull-up, Kontakt schaltet gegen GND)
+    GND (rot)                    -> GND
+    Windfahne Schleifer (grün)   -> A2
+    Windfahne Versorgung (gelb)  -> 5V
+    DHT22 Daten                  -> D5
+    BMP280 SDA/SCL               -> A4/A5
+*/
+
+#include <Wire.h>
+#include <avr/wdt.h>
+#include <DHT.h>
 #include <Adafruit_BMP280.h>
 
-Adafruit_BMP280 bmp;  // use I2C interface
-Adafruit_Sensor *bmp_temp = bmp.getTemperatureSensor();
-Adafruit_Sensor *bmp_pressure = bmp.getPressureSensor();
+// ---------- Pins ----------
+const uint8_t PIN_DHT        = 5;
+const uint8_t PIN_WIND_SPEED = 2;   // INT0
+const uint8_t PIN_WIND_VANE  = A2;
 
-#define DHTPIN 5  // Digital pin connected to the DHT sensor
-#define DHTTYPE DHT22
-DHT dht(DHTPIN, DHTTYPE);
+// ---------- Konfiguration ----------
+const int16_t       VANE_OFFSET_DEG      = 180;        // nach Montage kalibrieren (z. B. 180)
+const unsigned long WIND_INTERVAL_MS     = 2500;     // Messintervall Wind + Ausgabe
+const unsigned long PRESSURE_INTERVAL_MS = 3600000UL; // Druck für Tendenz: 1x pro Stunde
+const float         KMH_PER_HZ           = 3.621;    // Davis: 2.25 mph pro Hz = 3.621 km/h pro Hz
+const float         TREND_THRESHOLD_HPA  = 1.0;      // Schwelle für "rising"/"falling" über 3 h
+const uint8_t       DEBOUNCE_MS          = 15;
 
-#define WindSensor_Pin (2)  // The pin location of the anemometer sensor
-#define WindVane_Pin (A2)   // The pin the wind vane sensor is connected to
-#define VaneOffset 0        // define the anemometer offset from magnetic north
+// ---------- Objekte ----------
+DHT dht(PIN_DHT, DHT22);
+Adafruit_BMP280 bmp;
 
-volatile unsigned int timerCount;          // used to determine 2.5sec timer count
-volatile unsigned long rotations;          // cup rotation counter used in interrupt routine
-volatile unsigned long contactBounceTime;  // Timer to avoid contact bounce in interrupt routine
+// ---------- Wind (ISR) ----------
+volatile uint8_t       rotations   = 0;
+volatile unsigned long lastPulseMs = 0;
 
-volatile int minute = 0;
-volatile int hour = 0;
-int minute_offset = 0;
-int hour_offset = 0;
+// ---------- Druckverlauf (Ringpuffer, 1 Wert pro Stunde) ----------
+const uint8_t HISTORY_SIZE = 25;
+float   pressureHistory[HISTORY_SIZE];
+uint8_t historyHead  = 0;   // nächster Schreibindex
+uint8_t historyCount = 0;
 
-volatile float windspeed;
-int vaneValue;      // raw analog value from wind vane
-int vaneDirection;  // translated 0 - 360 direction
-int calDirection;   // converted value with offset applied
+unsigned long lastWindMs;
+unsigned long lastPressureStoreMs;
 
-int winddir;
-float temperature;
-float pressure;
-String tendency_str;
+const char *const COMPASS[8] = { "N", "NO", "O", "SO", "S", "SW", "W", "NW" };
 
-const int PRESSURES_SIZE = 25;
-float pressures[PRESSURES_SIZE];
-int p = 0;
-boolean fired = false;
-boolean fired_hourly = false;
-//int c = 0; // count time units for printPressure()
+// ---------- ISR ----------
+void isr_rotation() {
+  unsigned long now = millis();
+  if (now - lastPulseMs > DEBOUNCE_MS) {
+    rotations++;
+    lastPulseMs = now;
+  }
+}
 
-void setup() {
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, HIGH);
-
-  // setup anemometer values
-  rotations = 0;
-  // setup timer values
-  timerCount = 0;
-
-  pinMode(WindSensor_Pin, INPUT);
-  attachInterrupt(digitalPinToInterrupt(WindSensor_Pin), isr_rotation, FALLING);
-
-  // Setup the timer intterupt for 0.5 second
-  Timer1.initialize(500000);
-  Timer1.attachInterrupt(isr_timer);
-  sei();  // Enable Interrupts
-
-  dht.begin();
-  Serial.begin(115200);
-
-  unsigned status;
-  //status = bmp.begin(BMP280_ADDRESS_ALT, BMP280_CHIPID);
-  //delay(1000);
-  //int addr = 0x76;
-  //status = bmp.begin(0x77);
+// ---------- BMP280 ----------
+bool initBMP() {
+  //bool ok = bmp.begin(0x76) || bmp.begin(0x77);
+  bool status = false;
   for (int addr = 0x76; addr < 0x100; addr++) {
     status = bmp.begin(addr);
     if (!status) {
@@ -75,240 +74,142 @@ void setup() {
       if (bmp.sensorID() > 0) break;
     }
   }
-  Serial.print("bmp sensorID: ");
-  Serial.println(bmp.sensorID());
+  if (status) {
+    bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,
+                    Adafruit_BMP280::SAMPLING_X1,
+                    Adafruit_BMP280::SAMPLING_X8,
+                    Adafruit_BMP280::FILTER_OFF,
+                    Adafruit_BMP280::STANDBY_MS_500);
+  }
+  return status;
+}
 
-  bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
-                  Adafruit_BMP280::SAMPLING_X1,     /* Temp. oversampling */
-                  Adafruit_BMP280::SAMPLING_X8,     /* Pressure oversampling */
-                  Adafruit_BMP280::FILTER_OFF,      /* Filtering. */
-                  Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
-  //bmp_temp->printSensorDetails();
+// Stationsdruck in hPa (kein Meeresspiegeldruck!), NAN bei ungültigem Wert
+float readPressureHpa() {
+  float p = bmp.readPressure() / 100.0f;
+  if (isnan(p) || p < 300.0f || p > 1100.0f) return NAN;
+  return p;
+}
 
-  sensors_event_t pressure_event;
-  bmp_pressure->getEvent(&pressure_event);
-  pressure = pressure_event.pressure;
-  if(isnan(pressure) || pressure < 955 || pressure > 1075) pressure = 1000.0;
-  initPressuresWithArrayData(pressure);
-  computeTendency();
-  digitalWrite(LED_BUILTIN, LOW);
+// ---------- Druckverlauf ----------
+void storePressure(float p) {
+  pressureHistory[historyHead] = p;
+  historyHead = (historyHead + 1) % HISTORY_SIZE;
+  if (historyCount < HISTORY_SIZE) historyCount++;
+}
+
+// Änderung über 3 Stunden (aktueller Wert vs. Wert vor 3 h)
+const char *computeTendency() {
+  if (historyCount < 4) return "--";   // noch keine 3 h Daten
+  float current = pressureHistory[(historyHead + HISTORY_SIZE - 1) % HISTORY_SIZE];
+  float before  = pressureHistory[(historyHead + HISTORY_SIZE - 4) % HISTORY_SIZE];
+  if (isnan(current) || isnan(before)) return "--";
+  float diff = current - before;
+  if (diff >  TREND_THRESHOLD_HPA) return "rising";
+  if (diff < -TREND_THRESHOLD_HPA) return "falling";
+  return "steady";
+}
+
+// ---------- Windfahne ----------
+int readWindDirection() {
+  int raw = analogRead(PIN_WIND_VANE);
+  int deg = (int)((long)raw * 360 / 1023);
+  deg = (deg + VANE_OFFSET_DEG) % 360;
+  if (deg < 0) deg += 360;
+  return deg;
+}
+
+const char *compassName(int deg) {
+  return COMPASS[((deg * 2 + 45) / 90) % 8]; // 360 --> 0 - 8
+}
+
+// ---------- Ausgabe ----------
+void printValue(float v, uint8_t decimals, const __FlashStringHelper *unit) {
+  if (isnan(v)) {
+    Serial.print(F("X"));
+  } else {
+    Serial.print(v, decimals);
+    Serial.print(unit);
+  }
+}
+
+void printUptime(unsigned long nowMs) {
+  unsigned long s = nowMs / 1000UL;
+  Serial.print(s / 3600UL);
+  Serial.print(':');
+  uint8_t m = (s / 60UL) % 60UL;
+  if (m < 10) Serial.print('0');
+  Serial.print(m);
+}
+
+// ---------- Setup / Loop ----------
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(PIN_WIND_SPEED, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PIN_WIND_SPEED), isr_rotation, FALLING);
+
+  Wire.begin();
+#ifdef WIRE_HAS_TIMEOUT
+  Wire.setWireTimeout(3000, true);   // I2C-Hänger abfangen
+#endif
+
+  dht.begin();
+  if (!initBMP()) Serial.println(F("BMP280 nicht gefunden"));
+
+  storePressure(readPressureHpa());
+
+  lastWindMs = lastPressureStoreMs = millis();
+  wdt_enable(WDTO_8S);
 }
 
 void loop() {
-  // read sensors
-  sensors_event_t temp_event, pressure_event;
-  bmp_temp->getEvent(&temp_event);
-  bmp_pressure->getEvent(&pressure_event);
+  wdt_reset();
 
-  temperature = dht.readTemperature();
-  pressure = pressure_event.pressure;
-  //windspeed
-  winddir = getwinddir();
-  
-  // fake values
-  /*temperature = random(-10,50);
-  pressure = random(960, 1070);
-  windspeed = random(0, 180);
-  winddir = random(0, 360);*/
+  unsigned long now = millis();
+  unsigned long elapsed = now - lastWindMs;
+  if (elapsed < WIND_INTERVAL_MS) return;
+  lastWindMs = now;
 
-  // write validated sensor data to serial
-  digitalWrite(LED_BUILTIN, HIGH);
-  computeMinute();
-  /*Serial.print(hour);
-  Serial.print(":");
-  Serial.print(minute);
-  Serial.print(":");
-  Serial.print(millis());
-  Serial.print(" ");*/
-  if (isnan(temperature) || temperature < -30 || temperature > 100) {
-    Serial.print("X");
-  } else {
-    Serial.print(temperature, 1);
-    Serial.print("o");
-    Serial.print("C");
-  }
-  Serial.print(" ");
-  if (isnan(pressure) || pressure < 955 || pressure > 1075) {
-    bmp.reset();
-    Serial.print("X");
-  } else {
-    Serial.print(pressure, 1);
-    Serial.print("hPa");
-  }
-  Serial.print(" ");
-  Serial.print(tendency_str);
-  Serial.print(" ");
-  if (isnan(windspeed) || windspeed < 0 || windspeed > 200) {
-    Serial.print("X");
-  } else {
-    Serial.print(windspeed, 1);
-    Serial.print("km/h");
-  }
-  Serial.print(" ");
-  if (isnan(winddir) || winddir < 0) {
-    Serial.print("X");
-  } else {
-    Serial.print(convertWind(winddir + 180));
-  }
-  Serial.println();
+  // Wind
+  noInterrupts();
+  uint8_t count = rotations;
+  rotations = 0;
+  interrupts();
+  float windKmh = (count * 1000.0f / elapsed) * KMH_PER_HZ;
+  int dir = readWindDirection();
 
-  //if(c == 10) { printPressures(); c = 0; }
-  //c++;
-  digitalWrite(LED_BUILTIN, LOW);
+  // Temperatur / Feuchte
+  float temperature = dht.readTemperature();
+  float humidity    = dht.readHumidity();
+  if (isnan(temperature) || temperature < -40 || temperature > 80) temperature = NAN;
+  if (isnan(humidity) || humidity < 0 || humidity > 100) humidity = NAN;
 
-  delay(200);
-}
+  // Druck (bei ungültigem Wert BMP280 neu initialisieren)
+  float pressure = readPressureHpa();
+  if (isnan(pressure)) initBMP();
 
-void resetBMP() {
-  unsigned status;
-  bmp.reset();
-  for (int addr = 0x76; addr < 0x100; addr++) {
-    status = bmp.begin(addr);
-    if (!status) {
-      //Serial.println(addr, HEX);
-    } else {
-      Serial.println(addr, HEX);
-      if (bmp.sensorID() > 0) break;
-    }
-  }
-  Serial.print("bmp sensorID: ");
-  Serial.println(bmp.sensorID());
-
-  bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
-                  Adafruit_BMP280::SAMPLING_X1,     /* Temp. oversampling */
-                  Adafruit_BMP280::SAMPLING_X8,     /* Pressure oversampling */
-                  Adafruit_BMP280::FILTER_OFF,      /* Filtering. */
-                  Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
-  //bmp_temp->printSensorDetails();
-}
-
-String convertWind(int degree) {
-  degree = degree + 22;
-  degree = degree % 360;
-  //Serial.println(degree);
-  if (degree < 45) {
-    return "N";
-  } else if (degree < 90) {
-    return "NO";
-  } else if (degree < 135) {
-    return "O";
-  } else if (degree < 180) {
-    return "SO";
-  } else if (degree < 225) {
-    return "S";
-  } else if (degree < 270) {
-    return "SW";
-  } else if (degree < 315) {
-    return "W";
-  } else if (degree < 360) {
-    return "NW";
-  } else {
-    return "invalid";
-  }
-}
-
-// isr routine for timer interrupt
-void isr_timer() {
-  timerCount++;
-  if (timerCount % 5 == 0) {
-    windspeed = rotations * 1.7;
-    rotations = 0;
-  }
-  if (timerCount == 60) {
-    if ((minute == 0) && !fired_hourly) {
-      if(isnan(pressure)) storePressure(1100.0);
-      else storePressure(pressure);
-      //printPressures();
-      computeTendency();
-      fired_hourly = true;
-    }
-    if ((minute == 1) && fired_hourly) {
-      fired_hourly = false;
-    }
-    timerCount = 0;
-  }
-}
-
-// interrupt handler to increment the rotation count for wind speed
-void isr_rotation() {
-  if ((millis() - contactBounceTime) > 15) {  // debounce the switch contact.
-    rotations++;
-    contactBounceTime = millis();
-  }
-}
-
-// Get Wind Direction
-int getwinddir() {
-  vaneValue = analogRead(WindVane_Pin);
-  vaneDirection = map(vaneValue, 0, 1023, 0, 360);
-  calDirection = vaneDirection + VaneOffset;
-
-  if (calDirection > 360)
-    calDirection = calDirection - 360;
-  if (calDirection < 0)
-    calDirection = calDirection + 360;
-  return calDirection;
-}
-
-float correction[] = { 0, 0.518, 1.0, 1.414, 1.732, 1.932, 2.0, 1.932, 1.732, 1.414, 1.0, 0.518, 0, -0.518, -1.0, -1.414, -1.732, -1.932, -2.0, -1.932, -1.732, -1.414, -1, -0.518, 0 };
-
-// init pressure array with estimated pressures based on current pressure
-void initPressuresWithArrayData(float pressure) {
-  for (int p = 0; p < PRESSURES_SIZE; p++) {
-    float value = pressure + correction[(getHour() + p) % 24];
-    //Serial.println(value);
-    pressures[p] = value;
-  }
-}
-
-void storePressure(float pressure) {
-Serial.print("store pressure ");
-  Serial.println(pressure);
-  pressures[p] = pressure;
-  p++;
-  if (p >= PRESSURES_SIZE) p = 0;
-}
-
-void printPressures() {
-  for (int i = 0; i < PRESSURES_SIZE; i++) {
-    Serial.print(pressures[i]);
-    Serial.print(" ");
-  }
-  Serial.println();
-}
-
-String computeTendency() {
-  int p0 = p - 1;
-  int p1 = p;
-  if (p0 < 0) p0 = PRESSURES_SIZE - 1;
-
-  float tendency;
-  float pressure0 = round(pressures[p0] * 10.0) / 10.0;
-  float pressure1 = round(pressures[p1] * 10.0) / 10.0;
-  if(isnan(pressure0) || pressure0 < 955 || pressure0 > 1075 || 
-     isnan(pressure1) || pressure1 < 955 || pressure1 > 1075) {
-    tendency_str = "invalid";
-    return;
+  // Stündlich für die Tendenz speichern
+  if (now - lastPressureStoreMs >= PRESSURE_INTERVAL_MS) {
+    lastPressureStoreMs += PRESSURE_INTERVAL_MS;
+    storePressure(pressure);
   }
 
-
-  if (pressure0 >= pressure1)
-    tendency = pressure0 - pressure1;  // rising
-  else
-    tendency = -1 * (pressure1 - pressure0);  // falling
-
-  if (tendency > 0) tendency_str = "rising";
-  else if (tendency == 0) tendency_str = "steady";  // steady
-  else tendency_str = "falling";
-  return tendency_str;
-}
-
-int computeMinute() {
-  minute = (millis() / 1000 / 60) % 60;
-}
-
-int getHour() {
-  computeMinute();
-  hour = (minute / 60) % 24;
-  return hour;
+  // Ausgabe
+  printUptime(now);
+  Serial.print(' ');
+  printValue(temperature, 1, F("oC"));
+  Serial.print(' ');
+  printValue(humidity, 0, F("%"));
+  Serial.print(' ');
+  printValue(pressure, 1, F("hPa"));
+  Serial.print(' ');
+  Serial.print(computeTendency());
+  Serial.print(' ');
+  printValue(windKmh, 1, F("km/h"));
+  Serial.print(' ');
+  Serial.print(compassName(dir));
+  Serial.print(' ');
+  Serial.print(dir);
+  Serial.println(F("deg"));
 }
