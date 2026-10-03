@@ -47,6 +47,16 @@ float   pressureHistory[HISTORY_SIZE];
 uint8_t historyHead  = 0;   // nächster Schreibindex
 uint8_t historyCount = 0;
 
+// ---------- BMP280-Validierung ----------
+const float MAX_P_STEP_HPA = 3.0;
+const float MAX_T_DIFF_C = 8.0;
+const uint8_t NOISE_WINDOW = 24;
+
+bool bmpAlive = true;
+float lastGoodP = NAN;
+float jumpP = NAN;
+uint8_t jumpCount = 0;
+
 unsigned long lastWindMs;
 unsigned long lastPressureStoreMs;
 
@@ -70,7 +80,7 @@ bool initBMP() {
     if (!status) {
       //Serial.println(addr, HEX);
     } else {
-      Serial.println(addr, HEX);
+      //Serial.println(addr, HEX);
       if (bmp.sensorID() > 0) break;
     }
   }
@@ -89,6 +99,48 @@ float readPressureHpa() {
   float p = bmp.readPressure() / 100.0f;
   if (isnan(p) || p < 300.0f || p > 1100.0f) return NAN;
   return p;
+}
+
+// lebt der sensor?
+bool bmpHasNoise(float t, float p) {
+    static float tMin, tMax, pMin, pMax;
+    static uint8_t n = 0;
+
+    if (n == 0) {
+        tMin = tMax = t;
+        pMin = pMax = p;
+    } else {
+        if(t < tMin) tMin = t;
+        if(t > tMax) tMax = t;
+        if(p < pMin) pMin = p;
+        if(p > pMax) pMax = p;
+    }
+
+    if(++n >= NOISE_WINDOW) {
+        n = 0;
+        bmpAlive = (tMax > tMin) && (pMax > pMin);
+    }
+    return bmpAlive;
+}
+
+// Stationsdruck in hPa (kein Meeresspiegeldruck!), NAN bei ungültigem Wert
+float readPressureValidated() {
+    float t = bmp.readTemperature();
+    float p = bmp.readPressure() / 100.0f;
+
+    if (isnan(t) || isnan(p) || t < -40 || t > 85 || p < 300.0f || p > 1100.0f) return NAN;
+    
+    if (!bmpHasNoise(t,p)) return NAN;
+
+    if (!isnan(lastGoodP) && fabs(p - lastGoodP) > MAX_P_STEP_HPA) {
+        if (jumpCount > 0 && fabs(p -jumpP) < 0.5f) jumpCount++;
+        else jumpCount = 1;
+        jumpP = p;
+        if (jumpCount < 5) return NAN;
+    }
+    jumpCount = 0;
+    lastGoodP = p;
+    return p;
 }
 
 // ---------- Druckverlauf ----------
@@ -186,7 +238,7 @@ void loop() {
   if (isnan(humidity) || humidity < 0 || humidity > 100) humidity = NAN;
 
   // Druck (bei ungültigem Wert BMP280 neu initialisieren)
-  float pressure = readPressureHpa();
+  float pressure = readPressureValidated();
   if (isnan(pressure)) initBMP();
 
   // Stündlich für die Tendenz speichern
@@ -202,7 +254,8 @@ void loop() {
   Serial.print(' ');
   printValue(humidity, 0, F("%"));
   Serial.print(' ');
-  printValue(pressure, 1, F("hPa"));
+  //Serial.print(bmp.readTemperature()); Serial.print(" C ");
+  printValue(pressure, 2, F("hPa"));
   Serial.print(' ');
   Serial.print(computeTendency());
   Serial.print(' ');
